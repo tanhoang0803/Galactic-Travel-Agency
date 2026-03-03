@@ -4,7 +4,7 @@ A C# (.NET 10) **ASP.NET Core Web API** for managing interplanetary passengers a
 
 ## Live Demo
 
-> **[https://galactic-travel-agency.onrender.com](https://galactic-travel-agency.onrender.com)**
+> **[https://galactic-travel-agency-c.onrender.com](https://galactic-travel-agency-c.onrender.com)**
 >
 > Opens directly to Swagger UI — try the endpoints right in your browser. (Free tier may take ~30 s to spin up on first request.)
 
