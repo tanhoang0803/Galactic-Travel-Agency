@@ -1,6 +1,6 @@
 namespace GalacticTravelAgency.Models;
 
-class Passenger
+public class Passenger
 {
     public Guid Id { get; init; } = Guid.NewGuid();
     public string Name { get; set; } = "";

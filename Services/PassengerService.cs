@@ -3,7 +3,7 @@ using GalacticTravelAgency.Models;
 
 namespace GalacticTravelAgency.Services;
 
-class PassengerService
+public class PassengerService
 {
     private static readonly string DataDir  = Path.Combine(AppContext.BaseDirectory, "data");
     private static readonly string FilePath = Path.Combine(DataDir, "passengers.json");

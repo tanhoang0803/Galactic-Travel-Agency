@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: galactic-travel-agency
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+    healthCheckPath: /swagger/v1/swagger.json

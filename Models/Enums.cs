@@ -1,4 +1,4 @@
 namespace GalacticTravelAgency.Models;
 
-enum TicketType { Economy, Business, FirstClass }
-enum Planet { Mars, Venus, Jupiter, Saturn, Neptune }
+public enum TicketType { Economy, Business, FirstClass }
+public enum Planet { Mars, Venus, Jupiter, Saturn, Neptune }

@@ -1,230 +1,174 @@
-// ─── Galactic Travel Agency ───────────────────────────────────────────────────
-// Original concepts preserved in Passenger model layer:
-//   • Variables: Name, Age, TicketType, PreferredPlanet
-//   • Increment: AgeAsDouble uses explicit cast; the increment demo runs below
-//   • Explicit conversion: (double)Age  → AgeAsDouble property
-//   • Implicit conversion: double d = Age → AgeImplicit property
-//   • Convert.ToString: Convert.ToString(Age) → AgeAsString property
+// ─── Galactic Travel Agency — ASP.NET Core Web API ───────────────────────────
+// Original C# concepts preserved in Passenger model layer:
+//   • Explicit conversion : (double)Age  → AgeAsDouble property
+//   • Implicit conversion : double d = Age → AgeImplicit property
+//   • Convert.ToString    : Convert.ToString(Age) → AgeAsString property
 // ──────────────────────────────────────────────────────────────────────────────
 
+using System.Text.Json.Serialization;
 using GalacticTravelAgency.Models;
 using GalacticTravelAgency.Services;
+using Microsoft.AspNetCore.Mvc;
 
-var passengerSvc = new PassengerService();
-var bookingSvc   = new BookingService();
+var builder = WebApplication.CreateBuilder(args);
+
+// ── DI ────────────────────────────────────────────────────────────────────────
+builder.Services.AddSingleton<PassengerService>();
+builder.Services.AddSingleton<BookingService>();
+
+// ── JSON: enums as strings ────────────────────────────────────────────────────
+builder.Services.ConfigureHttpJsonOptions(opts =>
+    opts.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
+
+// ── Swagger / OpenAPI ─────────────────────────────────────────────────────────
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen(c =>
+{
+    c.SwaggerDoc("v1", new() { Title = "Galactic Travel Agency", Version = "v1" });
+});
+
+var app = builder.Build();
+
+// ── Persist / seed on startup ─────────────────────────────────────────────────
+var passengerSvc = app.Services.GetRequiredService<PassengerService>();
+var bookingSvc   = app.Services.GetRequiredService<BookingService>();
 passengerSvc.Load();
 bookingSvc.Load();
+SeedIfEmpty(passengerSvc, bookingSvc);
 
-while (true)
+// ── Swagger at root ───────────────────────────────────────────────────────────
+app.UseSwagger();
+app.UseSwaggerUI(c =>
 {
-    Console.WriteLine();
-    Console.WriteLine("=== Galactic Travel Agency ===");
-    Console.WriteLine("1. Add passenger");
-    Console.WriteLine("2. List all passengers");
-    Console.WriteLine("3. Search passenger by name");
-    Console.WriteLine("4. Remove passenger");
-    Console.WriteLine("5. Book a trip");
-    Console.WriteLine("6. View all bookings");
-    Console.WriteLine("7. View bookings by passenger");
-    Console.WriteLine("8. Cancel booking");
-    Console.WriteLine("0. Exit");
-    Console.Write("> ");
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "Galactic Travel Agency v1");
+    c.RoutePrefix = string.Empty; // serve at "/"
+});
 
-    string choice = Console.ReadLine()?.Trim() ?? "";
+// ── Endpoints ─────────────────────────────────────────────────────────────────
 
-    switch (choice)
-    {
-        case "1": AddPassenger();          break;
-        case "2": ListPassengers();        break;
-        case "3": SearchPassenger();       break;
-        case "4": RemovePassenger();       break;
-        case "5": BookTrip();              break;
-        case "6": ViewAllBookings();       break;
-        case "7": ViewBookingsByPassenger(); break;
-        case "8": CancelBooking();         break;
-        case "0":
-            Console.WriteLine("Safe travels!");
-            return;
-        default:
-            Console.WriteLine("Unknown option.");
-            break;
-    }
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-void AddPassenger()
+// POST /passengers — add a new passenger
+app.MapPost("/passengers", (CreatePassengerRequest req, PassengerService svc) =>
 {
-    string name = PromptNonEmpty("Passenger name");
-
-    int age = PromptInt("Age", min: 1, max: 120);
-
-    TicketType ticket = PromptEnum<TicketType>("Ticket type");
-    Planet planet     = PromptEnum<Planet>("Preferred planet");
-
-    var p = new Passenger
+    var passenger = new Passenger
     {
-        Name            = name,
-        Age             = age,
-        TicketType      = ticket,
-        PreferredPlanet = planet,
+        Name            = req.Name,
+        Age             = req.Age,
+        TicketType      = req.TicketType,
+        PreferredPlanet = req.PreferredPlanet,
+    };
+    var (ok, error) = svc.Add(passenger);
+    return ok
+        ? Results.Created($"/passengers/{passenger.Id}", passenger)
+        : Results.BadRequest(new { error });
+})
+.WithName("CreatePassenger")
+.WithTags("Passengers");
+
+// GET /passengers — list all passengers
+app.MapGet("/passengers", (PassengerService svc) => svc.GetAll())
+   .WithName("ListPassengers")
+   .WithTags("Passengers");
+
+// GET /passengers/search?name= — search by name
+app.MapGet("/passengers/search", ([FromQuery] string name, PassengerService svc) =>
+    svc.FindByName(name))
+   .WithName("SearchPassengers")
+   .WithTags("Passengers");
+
+// GET /passengers/{id} — get one passenger by ID
+app.MapGet("/passengers/{id:guid}", (Guid id, PassengerService svc) =>
+{
+    var p = svc.GetById(id);
+    return p is not null ? Results.Ok(p) : Results.NotFound();
+})
+.WithName("GetPassenger")
+.WithTags("Passengers");
+
+// DELETE /passengers/{id} — remove a passenger
+app.MapDelete("/passengers/{id:guid}", (Guid id, PassengerService svc) =>
+{
+    bool removed = svc.Remove(id);
+    return removed ? Results.Ok(new { message = "Passenger removed." }) : Results.NotFound();
+})
+.WithName("RemovePassenger")
+.WithTags("Passengers");
+
+// POST /bookings — book a trip
+app.MapPost("/bookings", (CreateBookingRequest req, PassengerService passSvc, BookingService bookSvc) =>
+{
+    var passenger = passSvc.GetById(req.PassengerId);
+    if (passenger is null)
+        return Results.NotFound(new { error = "Passenger not found." });
+
+    var booking = bookSvc.Book(passenger, req.Destination, req.DepartureDate);
+    return Results.Created($"/bookings/{booking.Id}", booking);
+})
+.WithName("CreateBooking")
+.WithTags("Bookings");
+
+// GET /bookings — list all bookings
+app.MapGet("/bookings", (BookingService svc) => svc.GetAll())
+   .WithName("ListBookings")
+   .WithTags("Bookings");
+
+// GET /bookings/passenger/{passengerId} — bookings for a specific passenger
+app.MapGet("/bookings/passenger/{passengerId:guid}", (Guid passengerId, BookingService svc) =>
+    svc.GetByPassenger(passengerId))
+   .WithName("GetBookingsByPassenger")
+   .WithTags("Bookings");
+
+// DELETE /bookings/{id} — cancel a booking
+app.MapDelete("/bookings/{id:guid}", (Guid id, BookingService svc) =>
+{
+    bool cancelled = svc.Cancel(id);
+    return cancelled ? Results.Ok(new { message = "Booking cancelled." }) : Results.NotFound();
+})
+.WithName("CancelBooking")
+.WithTags("Bookings");
+
+// ── Start ─────────────────────────────────────────────────────────────────────
+string port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
+app.Run($"http://+:{port}");
+
+// ── Seed ─────────────────────────────────────────────────────────────────────
+static void SeedIfEmpty(PassengerService passSvc, BookingService bookSvc)
+{
+    if (passSvc.GetAll().Count > 0) return;
+
+    var zara = new Passenger
+    {
+        Id              = new Guid("11111111-1111-1111-1111-111111111111"),
+        Name            = "Zara Voss",
+        Age             = 34,
+        TicketType      = TicketType.FirstClass,
+        PreferredPlanet = Planet.Neptune,
+    };
+    var dex = new Passenger
+    {
+        Id              = new Guid("22222222-2222-2222-2222-222222222222"),
+        Name            = "Dex Kowalski",
+        Age             = 27,
+        TicketType      = TicketType.Economy,
+        PreferredPlanet = Planet.Mars,
+    };
+    var mira = new Passenger
+    {
+        Id              = new Guid("33333333-3333-3333-3333-333333333333"),
+        Name            = "Mira Solano",
+        Age             = 41,
+        TicketType      = TicketType.Business,
+        PreferredPlanet = Planet.Jupiter,
     };
 
-    // Demo original increment concept
-    int ageBeforeIncrement = p.Age;
-    p.Age++;
-    Console.WriteLine($"  (Original age: {ageBeforeIncrement} → after increment: {p.Age})");
-    Console.WriteLine($"  Explicit cast to double : {p.AgeAsDouble}");
-    Console.WriteLine($"  Implicit cast to double : {p.AgeImplicit}");
-    Console.WriteLine($"  Convert.ToString(Age)   : {p.AgeAsString}");
-    p.Age--;  // restore to what was entered
+    passSvc.Add(zara);
+    passSvc.Add(dex);
+    passSvc.Add(mira);
 
-    var (ok, error) = passengerSvc.Add(p);
-    Console.WriteLine(ok ? $"Added passenger {p.Name} (ID: {p.Id})" : $"Error: {error}");
+    bookSvc.Book(zara,  Planet.Neptune, new DateTime(2026, 7, 1));
+    bookSvc.Book(dex,   Planet.Mars,    new DateTime(2026, 8, 15));
+    bookSvc.Book(mira,  Planet.Jupiter, new DateTime(2026, 9, 30));
 }
 
-void ListPassengers()
-{
-    var list = passengerSvc.GetAll();
-    if (list.Count == 0) { Console.WriteLine("No passengers."); return; }
-    Console.WriteLine();
-    foreach (var p in list)
-        PrintPassenger(p);
-}
-
-void SearchPassenger()
-{
-    string term = PromptNonEmpty("Search name");
-    var results = passengerSvc.FindByName(term).ToList();
-    if (results.Count == 0) { Console.WriteLine("No matches."); return; }
-    foreach (var p in results)
-        PrintPassenger(p);
-}
-
-void RemovePassenger()
-{
-    Guid id = PromptGuid("Passenger ID to remove");
-    bool ok = passengerSvc.Remove(id);
-    Console.WriteLine(ok ? "Passenger removed." : "Passenger not found.");
-}
-
-void BookTrip()
-{
-    Guid id = PromptGuid("Passenger ID");
-    var passenger = passengerSvc.GetById(id);
-    if (passenger is null) { Console.WriteLine("Passenger not found."); return; }
-
-    Planet destination = PromptEnum<Planet>("Destination planet");
-    DateTime departure  = PromptDate("Departure date (yyyy-MM-dd)");
-
-    var booking = bookingSvc.Book(passenger, destination, departure);
-    Console.WriteLine($"Booked! Flight {booking.FlightNumber} on {booking.DepartureDate:yyyy-MM-dd} — Price: {booking.Price:C}");
-}
-
-void ViewAllBookings()
-{
-    var list = bookingSvc.GetAll();
-    if (list.Count == 0) { Console.WriteLine("No bookings."); return; }
-    Console.WriteLine();
-    foreach (var b in list)
-        PrintBooking(b);
-}
-
-void ViewBookingsByPassenger()
-{
-    Guid id = PromptGuid("Passenger ID");
-    var passenger = passengerSvc.GetById(id);
-    if (passenger is null) { Console.WriteLine("Passenger not found."); return; }
-
-    var results = bookingSvc.GetByPassenger(id).ToList();
-    if (results.Count == 0) { Console.WriteLine("No bookings for this passenger."); return; }
-    foreach (var b in results)
-        PrintBooking(b);
-}
-
-void CancelBooking()
-{
-    Guid id = PromptGuid("Booking ID to cancel");
-    bool ok = bookingSvc.Cancel(id);
-    Console.WriteLine(ok ? "Booking cancelled." : "Booking not found.");
-}
-
-// ── Display helpers ───────────────────────────────────────────────────────────
-
-void PrintPassenger(Passenger p)
-{
-    Console.WriteLine($"  [{p.Id}] {p.Name}, Age {p.Age}, {p.TicketType}, Prefers: {p.PreferredPlanet}");
-}
-
-void PrintBooking(Booking b)
-{
-    var passenger = passengerSvc.GetById(b.PassengerId);
-    string name = passenger?.Name ?? b.PassengerId.ToString();
-    Console.WriteLine($"  [{b.Id}] {b.FlightNumber} | {name} → {b.Destination} | {b.DepartureDate:yyyy-MM-dd} | {b.Price:C}");
-}
-
-// ── Input helpers ─────────────────────────────────────────────────────────────
-
-string PromptNonEmpty(string label)
-{
-    while (true)
-    {
-        Console.Write($"{label}: ");
-        string value = Console.ReadLine()?.Trim() ?? "";
-        if (!string.IsNullOrWhiteSpace(value)) return value;
-        Console.WriteLine("  Value cannot be empty. Try again.");
-    }
-}
-
-int PromptInt(string label, int min, int max)
-{
-    while (true)
-    {
-        Console.Write($"{label} ({min}–{max}): ");
-        string raw = Console.ReadLine()?.Trim() ?? "";
-        if (int.TryParse(raw, out int value) && value >= min && value <= max)
-            return value;
-        Console.WriteLine($"  Must be an integer between {min} and {max}. Try again.");
-    }
-}
-
-T PromptEnum<T>(string label) where T : struct, Enum
-{
-    string[] names = Enum.GetNames<T>();
-    while (true)
-    {
-        Console.WriteLine($"{label}:");
-        for (int i = 0; i < names.Length; i++)
-            Console.WriteLine($"  {i + 1}. {names[i]}");
-        Console.Write("> ");
-        string raw = Console.ReadLine()?.Trim() ?? "";
-        if (int.TryParse(raw, out int idx) && idx >= 1 && idx <= names.Length)
-            return Enum.Parse<T>(names[idx - 1]);
-        Console.WriteLine("  Invalid selection. Try again.");
-    }
-}
-
-Guid PromptGuid(string label)
-{
-    while (true)
-    {
-        Console.Write($"{label}: ");
-        string raw = Console.ReadLine()?.Trim() ?? "";
-        if (Guid.TryParse(raw, out Guid id)) return id;
-        Console.WriteLine("  Invalid ID format. Try again.");
-    }
-}
-
-DateTime PromptDate(string label)
-{
-    while (true)
-    {
-        Console.Write($"{label}: ");
-        string raw = Console.ReadLine()?.Trim() ?? "";
-        if (DateTime.TryParseExact(raw, "yyyy-MM-dd",
-            System.Globalization.CultureInfo.InvariantCulture,
-            System.Globalization.DateTimeStyles.None, out DateTime dt))
-            return dt;
-        Console.WriteLine("  Invalid date. Use format yyyy-MM-dd. Try again.");
-    }
-}
+// ── Request DTOs ─────────────────────────────────────────────────────────────
+record CreatePassengerRequest(string Name, int Age, TicketType TicketType, Planet PreferredPlanet);
+record CreateBookingRequest(Guid PassengerId, Planet Destination, DateTime DepartureDate);

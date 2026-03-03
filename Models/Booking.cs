@@ -1,6 +1,6 @@
 namespace GalacticTravelAgency.Models;
 
-class Booking
+public class Booking
 {
     // Base prices per ticket type
     private static readonly Dictionary<TicketType, decimal> BasePrices = new()
