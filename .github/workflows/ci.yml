@@ -1,4 +1,4 @@
-name: CI / Deploy
+name: CI
 
 on:
   push:
@@ -25,17 +25,3 @@ jobs:
 
       - name: Build
         run: dotnet build --no-restore --configuration Release
-
-  deploy:
-    name: Trigger Render Deploy
-    runs-on: ubuntu-latest
-    needs: build
-    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
-
-    steps:
-      - name: Deploy to Render
-        run: |
-          curl -s --fail \
-            "https://api.render.com/deploy/srv-${{ secrets.RENDER_SERVICE_ID }}?key=${{ secrets.RENDER_DEPLOY_KEY }}" \
-            -o /dev/null
-          echo "Deploy triggered successfully"
